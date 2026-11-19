@@ -3,6 +3,7 @@ name: Fork - Build and Push Images
 on:
   push:
     branches: [main]
+    tags: ['v*-scality*']
   workflow_dispatch:
 
 permissions:
