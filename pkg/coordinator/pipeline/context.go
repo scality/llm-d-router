@@ -184,6 +184,9 @@ type RequestContext struct {
 	// forwarded onto the decode request by newDecodeProxyRequest. Empty when
 	// the prefill EPP's config has no topology-stamp-handler.
 	PeerTopology string
+	// PrefillDone reports whether the HTTP PrefillStep got the prefill
+	// response, so the decode step knows a prefill worker is storing the KV.
+	PrefillDone bool
 
 	forwardResponseHeaders map[string]struct{}
 	downstreamHeaders      map[string]string

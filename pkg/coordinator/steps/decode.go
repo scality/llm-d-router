@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -40,8 +41,9 @@ func init() {
 }
 
 type DecodeStep struct {
-	gwClient *gateway.Client
-	kv       kv.Connector
+	gwClient      *gateway.Client
+	kv            kv.Connector
+	waitForStored time.Duration
 }
 
 func NewDecodeStep(gwClient *gateway.Client, params map[string]any) (pipeline.Step, error) {
@@ -55,7 +57,17 @@ func NewDecodeStep(gwClient *gateway.Client, params map[string]any) (pipeline.St
 	if err != nil {
 		return nil, fmt.Errorf("decode: %w", err)
 	}
-	return &DecodeStep{gwClient: gwClient, kv: kvConn}, nil
+	waitForStored, _, err := paramDuration(params, ParamWaitForStoredTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("decode: %w", err)
+	}
+	if waitForStored < 0 {
+		return nil, fmt.Errorf("decode: %s must not be negative, got %v", ParamWaitForStoredTimeout, waitForStored)
+	}
+	if waitForStored > 0 && kvConn.Name() != kv.SharedStorage {
+		return nil, fmt.Errorf("decode: %s requires kv_connector %s, got %s", ParamWaitForStoredTimeout, kv.SharedStorage, kvConn.Name())
+	}
+	return &DecodeStep{gwClient: gwClient, kv: kvConn, waitForStored: waitForStored}, nil
 }
 
 func (s *DecodeStep) Name() string { return DecodeStepName }
@@ -89,6 +101,9 @@ func (s *DecodeStep) prepareDecodeBody(ctx context.Context, reqCtx *pipeline.Req
 	format := reqcommon.DetectAPIType(reqCtx.OriginalPath)
 
 	kvParams := s.kv.PrepareDecodeKVParams(ctx, reqCtx)
+	if s.waitForStored > 0 && reqCtx.PrefillDone {
+		kvParams[reqcommon.FieldWaitForStored] = reqcommon.WaitForStoredParams(s.waitForStored)
+	}
 	s.injectUUIDs(reqCtx, logger)
 
 	switch format {

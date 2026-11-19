@@ -51,7 +51,12 @@ const (
 	// ContentTypeOptionsNoSniff disables MIME sniffing; http.Error sets it on every body it writes.
 	ContentTypeOptionsNoSniff = "nosniff"
 
-	FieldKVTransferParams     = "kv_transfer_params"
+	FieldKVTransferParams = "kv_transfer_params"
+	// FieldWaitForStored is the kv_transfer_params field that has a decode pod
+	// wait for the KV a prefill pod is storing in a tier both share.
+	FieldWaitForStored = "wait_for_stored"
+	// FieldTimeoutMS is the wait_for_stored field bounding that wait.
+	FieldTimeoutMS            = "timeout_ms"
 	FieldECTransferParams     = "ec_transfer_params"
 	FieldMaxTokens            = "max_tokens"
 	FieldMaxCompletionTokens  = "max_completion_tokens"

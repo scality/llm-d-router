@@ -112,6 +112,7 @@ func (s *PrefillStep) Execute(ctx context.Context, reqCtx *pipeline.RequestConte
 	}
 
 	reqCtx.KVTransferParams = coerceParamsMap(logger, prefillResp.KVTransferParams, "kv_transfer_params")
+	reqCtx.PrefillDone = true
 	if len(reqCtx.KVTransferParams) == 0 && s.kv.Name() == kv.NIXL {
 		// kv-nixl always requests a remote-decode handoff, so missing
 		// kv_transfer_params means decode will recompute the whole prompt.

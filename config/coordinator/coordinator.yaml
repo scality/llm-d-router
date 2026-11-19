@@ -450,3 +450,11 @@ pipeline:
     - type: decode
       # params:
       #   kv_connector: kv-nixl     # overrides pipeline.kv_connector
+      #
+      #   wait_for_stored_timeout, with kv_connector kv-shared-storage, adds
+      #   kv_transfer_params.wait_for_stored {timeout_ms} to an HTTP decode
+      #   request that follows a prefill. The decode worker waits up to that
+      #   long for the prompt KV the prefill worker stores after answering
+      #   (such as a vLLM OffloadingConnector with a shared fs or obj tier),
+      #   then computes the part still missing. Unset or 0 disables it.
+      #   wait_for_stored_timeout: 5s

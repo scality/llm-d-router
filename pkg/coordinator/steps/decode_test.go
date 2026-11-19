@@ -542,6 +542,65 @@ func TestDecodeStep_CompletionsFormat_RewritesPromptAndTopLevelKV(t *testing.T) 
 	}
 }
 
+// TestDecodeStep_WaitForStored covers kv_transfer_params.wait_for_stored: set
+// with wait_for_stored_timeout on a decode that follows a prefill only, since
+// a decode without prefill waits for no KV.
+func TestDecodeStep_WaitForStored(t *testing.T) {
+	tests := []struct {
+		name       string
+		params     map[string]any
+		prefillRan bool
+		want       any
+	}{
+		{name: "off by default", params: map[string]any{}, prefillRan: true},
+		{
+			name:       "after prefill",
+			params:     map[string]any{ParamWaitForStoredTimeout: "5s"},
+			prefillRan: true,
+			want:       map[string]any{reqcommon.FieldTimeoutMS: int64(5000)},
+		},
+		{name: "without prefill", params: map[string]any{ParamWaitForStoredTimeout: "5s"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			step, err := NewDecodeStep(gateway.New(config.GatewayConfig{Address: "http://unused"}), tc.params)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reqCtx := &pipeline.RequestContext{
+				OriginalPath: reqcommon.PathChatCompletions,
+				PrefillDone:  tc.prefillRan,
+				Body:         map[string]any{"model": "m"},
+			}
+			if err := step.(*DecodeStep).prepareDecodeBody(context.Background(), reqCtx); err != nil {
+				t.Fatal(err)
+			}
+			kvParams := reqCtx.Body[reqcommon.FieldKVTransferParams].(map[string]any)
+			if got := kvParams[reqcommon.FieldWaitForStored]; fmt.Sprint(got) != fmt.Sprint(tc.want) {
+				t.Fatalf("wait_for_stored = %v, want %v (params %v)", got, tc.want, kvParams)
+			}
+		})
+	}
+}
+
+func TestDecodeStep_WaitForStoredTimeout_Rejects(t *testing.T) {
+	tests := []struct {
+		name   string
+		params map[string]any
+	}{
+		{name: "another connector", params: map[string]any{ParamKVConnector: "kv-nixl", ParamWaitForStoredTimeout: "5s"}},
+		{name: "negative", params: map[string]any{ParamWaitForStoredTimeout: "-1s"}},
+		{name: "no unit", params: map[string]any{ParamWaitForStoredTimeout: "5"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := NewDecodeStep(gateway.New(config.GatewayConfig{Address: "http://unused"}), tc.params); err == nil {
+				t.Fatalf("expected an error for %v", tc.params)
+			}
+		})
+	}
+}
+
 // TestDecodeStep_GenerateFormat_ToplevelKV verifies that for the
 // /inference/v1/generate format the decode step places kv_transfer_params at the
 // top level of the request body, and preserves the client's sampling_params so
