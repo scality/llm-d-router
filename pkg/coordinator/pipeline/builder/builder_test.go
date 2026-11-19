@@ -34,6 +34,8 @@ func TestValidatePipeline(t *testing.T) {
 	forward := map[string]any{steps.ParamForwardPromptTokenIDs: true}
 	forwardDecode := config.StepConfig{Type: steps.DecodeStepName, Params: forward}
 	forwardCondDecode := config.StepConfig{Type: steps.ConditionalDecodeStepName, Params: forward}
+	notifyPrefill := config.StepConfig{Type: steps.PrefillStepName, Params: map[string]any{steps.ParamNotifyStoredURL: "http://c:8080"}}
+	waitDecode := config.StepConfig{Type: steps.DecodeStepName, Params: map[string]any{steps.ParamWaitForStoredTimeout: "5s"}}
 
 	tests := []struct {
 		name    string
@@ -90,6 +92,26 @@ func TestValidatePipeline(t *testing.T) {
 		{
 			name:    "invalid worker_protocol is rejected",
 			cfg:     config.PipelineConfig{WorkerProtocol: "ws", UseOpenAIFormat: true, Steps: []config.StepConfig{decode}},
+			wantErr: true,
+		},
+		{
+			name:    "notify_stored_url with a waiting decode",
+			cfg:     config.PipelineConfig{UseOpenAIFormat: true, Steps: []config.StepConfig{notifyPrefill, waitDecode}},
+			wantErr: false,
+		},
+		{
+			name:    "notify_stored_url without wait_for_stored_timeout is rejected",
+			cfg:     config.PipelineConfig{UseOpenAIFormat: true, Steps: []config.StepConfig{notifyPrefill, decode}},
+			wantErr: true,
+		},
+		{
+			name:    "notify_stored_url with a zero wait_for_stored_timeout is rejected",
+			cfg:     config.PipelineConfig{UseOpenAIFormat: true, Steps: []config.StepConfig{notifyPrefill, {Type: steps.DecodeStepName, Params: map[string]any{steps.ParamWaitForStoredTimeout: "0s"}}}},
+			wantErr: true,
+		},
+		{
+			name:    "notify_stored_url with gRPC workers is rejected",
+			cfg:     config.PipelineConfig{UseOpenAIFormat: true, WorkerProtocol: config.WorkerProtocolGRPC, Steps: []config.StepConfig{notifyPrefill, waitDecode}},
 			wantErr: true,
 		},
 		{

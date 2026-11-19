@@ -30,10 +30,12 @@ import (
 )
 
 type cachedTokensUsageRewriter struct {
-	header        http.Header
-	cachedTokens  *int
-	onUsage       func(block map[string]any)
-	dropUsageOnly bool
+	header       http.Header
+	cachedTokens *int
+	// cachedTokensFn, when set, gives cachedTokens on first use.
+	cachedTokensFn func() *int
+	onUsage        func(block map[string]any)
+	dropUsageOnly  bool
 	// passthrough is set when no option can change a byte: the writer then
 	// forwards every write as it arrives, keeps Content-Length, and only reads
 	// the body on the side to report usage to the observer.
@@ -58,6 +60,11 @@ type Options struct {
 	// CachedTokens, when set, is written into every usage block as its
 	// cached-token count (see NewCachedTokensResponseWriter).
 	CachedTokens *int
+	// CachedTokensFunc, when set and CachedTokens is not, gives that count
+	// for a response that starts before it is known. It is called once, when
+	// the first usage block is rewritten, and may block until then; a nil
+	// result leaves the usage blocks as the worker wrote them.
+	CachedTokensFunc func() *int
 	// OnUsage is called with each usage block the response carries, decoded,
 	// before any rewrite. Streamed responses can carry more than one.
 	OnUsage func(block map[string]any)
@@ -95,12 +102,13 @@ func NewResponseWriter(
 	w http.ResponseWriter, opts Options, streaming bool,
 ) (http.ResponseWriter, func() error) {
 	rewriter := &cachedTokensUsageRewriter{
-		header:        w.Header(),
-		cachedTokens:  opts.CachedTokens,
-		onUsage:       opts.OnUsage,
-		dropUsageOnly: opts.DropUsageOnlyFrame,
-		passthrough:   opts.CachedTokens == nil && !opts.DropUsageOnlyFrame,
-		streaming:     streaming,
+		header:         w.Header(),
+		cachedTokens:   opts.CachedTokens,
+		cachedTokensFn: opts.CachedTokensFunc,
+		onUsage:        opts.OnUsage,
+		dropUsageOnly:  opts.DropUsageOnlyFrame,
+		passthrough:    opts.CachedTokens == nil && opts.CachedTokensFunc == nil && !opts.DropUsageOnlyFrame,
+		streaming:      streaming,
 	}
 	// httpsnoop preserves optional ResponseWriter interfaces such as
 	// http.Flusher, http.Hijacker, http.Pusher, and io.ReaderFrom.
@@ -375,7 +383,11 @@ func (r *cachedTokensUsageRewriter) processJSON(body []byte) ([]byte, bool) {
 		return nil, false
 	}
 	block, wrapper := r.observe(response)
-	if r.cachedTokens == nil || !rewritable(wrapper) || !setCachedTokens(block, *r.cachedTokens) {
+	if !rewritable(wrapper) || block == nil {
+		return body, true
+	}
+	cachedTokens := r.resolveCachedTokens()
+	if cachedTokens == nil || !setCachedTokens(block, *cachedTokens) {
 		return body, true
 	}
 	return marshalWithUsage(response, wrapper, block, body), true
@@ -443,7 +455,11 @@ func (r *cachedTokensUsageRewriter) processSSELine(line []byte) (out []byte, isD
 	if r.dropUsageOnly && block != nil && wrapper == "" && hasEmptyChoices(response) {
 		return nil, true, true
 	}
-	if r.cachedTokens == nil || !rewritable(wrapper) || !setCachedTokens(block, *r.cachedTokens) {
+	if !rewritable(wrapper) || block == nil {
+		return line, true, false
+	}
+	cachedTokens := r.resolveCachedTokens()
+	if cachedTokens == nil || !setCachedTokens(block, *cachedTokens) {
 		return line, true, false
 	}
 	updated := make([]byte, 0, len(line))
@@ -451,6 +467,16 @@ func (r *cachedTokensUsageRewriter) processSSELine(line []byte) (out []byte, isD
 	updated = append(updated, marshalWithUsage(response, wrapper, block, data)...)
 	updated = append(updated, lineEnding...)
 	return updated, true, false
+}
+
+// resolveCachedTokens returns the count to write, calling cachedTokensFn
+// the first time.
+func (r *cachedTokensUsageRewriter) resolveCachedTokens() *int {
+	if r.cachedTokensFn != nil {
+		r.cachedTokens = r.cachedTokensFn()
+		r.cachedTokensFn = nil
+	}
+	return r.cachedTokens
 }
 
 // observe decodes the usage block a response carries and reports it to the

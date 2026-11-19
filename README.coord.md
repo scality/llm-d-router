@@ -47,6 +47,7 @@ Configuration is a YAML file passed via the `--config` flag. See `config/coordin
 |--------|------|-------------|
 | POST | `/v1/chat/completions` | OpenAI Chat Completions API |
 | POST | `/v1/completions` | OpenAI Completions API |
+| POST | `/llm-d/kv-stored/{id}` | `notify_stored` callback from prefill workers, served when the prefill step sets `notify_stored_url` |
 | GET | `/healthz` | Health check |
 | GET | `/readyz` | Readiness check |
 

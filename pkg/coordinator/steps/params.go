@@ -66,6 +66,22 @@ const (
 	// prefill worker is storing, for workers that store the KV after answering
 	// the prefill. Requires kv-shared-storage. Unset or 0 disables it.
 	ParamWaitForStoredTimeout = "wait_for_stored_timeout"
+	// ParamNotifyStoredURL makes the prefill step start the decode step before
+	// the prefill response, once the prefill worker reports that the tier it
+	// shares with the decode workers holds the prompt KV but a tail. The value
+	// is the base URL the prefill workers reach this coordinator replica at
+	// (for example "http://${POD_IP}:8080"); ${VAR} references are expanded
+	// from the environment. The prefill request carries
+	// kv_transfer_params.notify_stored with a per-request URL under it, which
+	// the prefill worker POSTs to. Requires kv-shared-storage, HTTP workers,
+	// and a decode step with wait_for_stored_timeout. Unset disables it.
+	ParamNotifyStoredURL = "notify_stored_url"
+	// ParamNotifyStoredTokensLeft and ParamNotifyStoredTokensLeftRatio set
+	// that tail: the larger of a token count and a share of the prompt, in
+	// [0, 1], so that the decode worker's KV load ends about when the prefill
+	// does. Both default to 0: notified once the whole prompt is stored.
+	ParamNotifyStoredTokensLeft      = "notify_stored_tokens_left"
+	ParamNotifyStoredTokensLeftRatio = "notify_stored_tokens_left_ratio"
 )
 
 func buildKVConnector(params map[string]any) (kv.Connector, error) {
@@ -141,6 +157,29 @@ func paramDuration(params map[string]any, key string) (value time.Duration, ok b
 		return d, true, nil
 	default:
 		return 0, false, fmt.Errorf("%s: expected duration string, got %T", key, v)
+	}
+}
+
+// paramFloat reads a number step parameter, accepting the types paramInt
+// does. ok is false when the key is absent.
+func paramFloat(params map[string]any, key string) (value float64, ok bool, err error) {
+	switch v := params[key].(type) {
+	case nil:
+		return 0, false, nil
+	case int:
+		return float64(v), true, nil
+	case int64:
+		return float64(v), true, nil
+	case float64:
+		return v, true, nil
+	case json.Number:
+		f, convErr := v.Float64()
+		if convErr != nil {
+			return 0, false, fmt.Errorf("%s: %w", key, convErr)
+		}
+		return f, true, nil
+	default:
+		return 0, false, fmt.Errorf("%s: expected number, got %T", key, v)
 	}
 }
 

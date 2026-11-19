@@ -21,6 +21,7 @@ package builder
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/llm-d/llm-d-router/pkg/coordinator/config"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/gateway"
@@ -38,6 +39,9 @@ import (
 // pipeline.
 func validatePipeline(p config.PipelineConfig) error {
 	if err := config.ValidateWorkerProtocol(p.WorkerProtocol); err != nil {
+		return err
+	}
+	if err := validateNotifyStored(p); err != nil {
 		return err
 	}
 	hasRender := false
@@ -59,6 +63,35 @@ func validatePipeline(p config.PipelineConfig) error {
 		if forward, _ := s.Params[steps.ParamForwardPromptTokenIDs].(bool); forward {
 			return fmt.Errorf("%s on the %q step requires a %q step (it sends token IDs that render produces)", steps.ParamForwardPromptTokenIDs, s.Type, steps.RenderStepName)
 		}
+	}
+	return nil
+}
+
+// validateNotifyStored rejects a prefill step's notify_stored_url that cannot
+// work: only the HTTP prefill leg sends notify_stored, and the decode step it
+// starts early must wait for the KV still being stored, else the decode worker
+// recomputes it.
+func validateNotifyStored(p config.PipelineConfig) error {
+	notify, wait := false, false
+	for _, s := range p.Steps {
+		switch s.Type {
+		case steps.PrefillStepName:
+			_, notify = s.Params[steps.ParamNotifyStoredURL]
+		case steps.DecodeStepName:
+			if v, ok := s.Params[steps.ParamWaitForStoredTimeout].(string); ok {
+				d, err := time.ParseDuration(v)
+				wait = err == nil && d > 0
+			}
+		}
+	}
+	if !notify {
+		return nil
+	}
+	if p.WorkerProtocol == config.WorkerProtocolGRPC {
+		return fmt.Errorf("%s on the %q step requires worker_protocol %s", steps.ParamNotifyStoredURL, steps.PrefillStepName, config.WorkerProtocolHTTP)
+	}
+	if !wait {
+		return fmt.Errorf("%s on the %q step requires %s on the %q step", steps.ParamNotifyStoredURL, steps.PrefillStepName, steps.ParamWaitForStoredTimeout, steps.DecodeStepName)
 	}
 	return nil
 }

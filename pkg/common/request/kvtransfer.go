@@ -26,6 +26,18 @@ func WaitForStoredParams(timeout time.Duration) map[string]any {
 	return map[string]any{FieldTimeoutMS: timeout.Milliseconds()}
 }
 
+// NotifyStoredParams returns the kv_transfer_params.notify_stored value of a
+// prefill request: the prefill pod POSTs to url once the tier it shares with
+// the decode pods holds its prompt KV but the larger of tokensLeft tokens and
+// tokensLeftRatio of the prompt.
+func NotifyStoredParams(url string, tokensLeft int, tokensLeftRatio float64) map[string]any {
+	return map[string]any{
+		FieldNotifyStoredURL: url,
+		FieldTokensLeft:      tokensLeft,
+		FieldTokensLeftRatio: tokensLeftRatio,
+	}
+}
+
 // RemoteDecoderParams returns the kv_transfer_params of an OffloadingConnector
 // P2P tier prefill request: the prefill pod stores the KV under kvRequestID
 // for a decode pod to pull.

@@ -71,7 +71,16 @@ const (
 	// wait for the KV a prefill pod is storing in a tier both share.
 	FieldWaitForStored = "wait_for_stored"
 	// FieldTimeoutMS is the wait_for_stored field bounding that wait.
-	FieldTimeoutMS            = "timeout_ms"
+	FieldTimeoutMS = "timeout_ms"
+	// FieldNotifyStored is the kv_transfer_params field that has a prefill pod
+	// POST to a URL once a tier both pods share holds its prompt KV but a tail.
+	FieldNotifyStored = "notify_stored"
+	// FieldNotifyStoredURL, FieldTokensLeft and FieldTokensLeftRatio are the
+	// notify_stored fields: where to POST, and the tail, in tokens or as a
+	// share of the prompt, whichever is larger.
+	FieldNotifyStoredURL      = "url"
+	FieldTokensLeft           = "tokens_left"
+	FieldTokensLeftRatio      = "tokens_left_ratio"
 	FieldECTransferParams     = "ec_transfer_params"
 	FieldECDescriptorMetadata = "metadata" // ec_transfer_params descriptor field: the item's placeholder metadata
 	FieldMaxTokens            = "max_tokens"

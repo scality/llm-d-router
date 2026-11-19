@@ -226,6 +226,12 @@ type RequestContext struct {
 	// consumer that treats nil as zero reports no cache hits for a request that
 	// had them.
 	PrefillCachedTokens *int
+	// PrefillCachedTokensFunc stands for PrefillCachedTokens when the decode
+	// step starts before the prefill response (prefill notify_stored_url): it
+	// waits for that response and returns its count, nil when the prefill
+	// failed or measured nothing. The usage writer calls it at the response's
+	// usage block, which a decode worker sends last.
+	PrefillCachedTokensFunc func() *int
 	// PeerTopology carries the prefill endpoint's encoded topology from the
 	// prefill response to the decode request, for topology-affinity-filter
 	// and topology-affinity-scorer running in the decode EPP's profile.

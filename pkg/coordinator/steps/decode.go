@@ -171,6 +171,7 @@ func (s *DecodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContex
 						}
 						// The prefill cache-hit count describes the handoff just dropped.
 						reqCtx.PrefillCachedTokens = nil
+						reqCtx.PrefillCachedTokensFunc = nil
 					}
 					coordmetrics.IncForceStreamTotal(reqCtx.Model, fallbackResult)
 					// Fell back with nothing written; continue to the pass-through below.

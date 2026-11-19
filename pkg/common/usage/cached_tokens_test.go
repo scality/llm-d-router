@@ -544,3 +544,66 @@ func BenchmarkResponseWriterChunkedJSON(b *testing.B) {
 		})
 	}
 }
+
+// CachedTokensFunc is resolved once, when the first usage block is rewritten,
+// so a count known only after the response started can still replace it.
+func TestResponseWriter_CachedTokensFunc(t *testing.T) {
+	seven := 7
+	tests := []struct {
+		name      string
+		streaming bool
+		count     *int
+		writes    []string
+		want      string
+	}{
+		{
+			name:      "streamed",
+			streaming: true,
+			count:     &seven,
+			writes: []string{
+				"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n",
+				"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":64,\"prompt_tokens_details\":{\"cached_tokens\":64}}}\n\n",
+			},
+			want: "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n" +
+				"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":64,\"prompt_tokens_details\":{\"cached_tokens\":7}}}\n\n",
+		},
+		{
+			name:   "json",
+			count:  &seven,
+			writes: []string{`{"usage":{"prompt_tokens":64,"prompt_tokens_details":{"cached_tokens":64}}}`},
+			want:   `{"usage":{"prompt_tokens":64,"prompt_tokens_details":{"cached_tokens":7}}}`,
+		},
+		{
+			name:   "no count",
+			writes: []string{`{"usage":{"prompt_tokens":64,"prompt_tokens_details":{"cached_tokens":64}}}`},
+			want:   `{"usage":{"prompt_tokens":64,"prompt_tokens_details":{"cached_tokens":64}}}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			rec := httptest.NewRecorder()
+			w, finalize := NewResponseWriter(rec, Options{CachedTokensFunc: func() *int {
+				calls++
+				return tt.count
+			}}, tt.streaming)
+			for i, chunk := range tt.writes {
+				if _, err := w.Write([]byte(chunk)); err != nil {
+					t.Fatal(err)
+				}
+				if i < len(tt.writes)-1 && calls != 0 {
+					t.Fatalf("CachedTokensFunc called before the usage block")
+				}
+			}
+			if err := finalize(); err != nil {
+				t.Fatal(err)
+			}
+			if calls != 1 {
+				t.Fatalf("CachedTokensFunc called %d times, want 1", calls)
+			}
+			if got := rec.Body.String(); got != tt.want {
+				t.Fatalf("body = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
