@@ -1,0 +1,190 @@
+name: Fork - Sync with Upstream
+
+on:
+  schedule:
+    - cron: '0 5 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository_owner != 'llm-d'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write  # OIDC token for the workload identity federation to the Anthropic API
+    env:
+      SYNC_BRANCH: fork-sync/upstream-${{ github.run_id }}
+    steps:
+      # GITHUB_TOKEN cannot push commits that change .github/workflows, and its
+      # pushes do not trigger fork-images.yaml. The Eve CI CD App token is used
+      # instead, kept out of .git/config and out of the Claude step's environment.
+      - name: Get App token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.ACTIONS_APP_ID }}
+          private-key: ${{ secrets.ACTIONS_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-workflows: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Results:
+      #   up-to-date  nothing to do
+      #   clean       merge committed, nothing under .github/ changed, push to main
+      #   review      merge committed, .github/ changed, open a PR
+      #   conflict    merge stopped on conflicts, Claude resolves them, open a PR
+      #   pending-pr  an earlier sync PR is still open
+      - name: Merge upstream main
+        id: merge
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          open_pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --state open \
+            --json number,headRefName --jq '[.[] | select(.headRefName | startswith("fork-sync/"))][0].number // empty')
+          if [ -n "$open_pr" ]; then
+            echo "::notice::Sync PR #${open_pr} is still open, merge or close it first"
+            echo "result=pending-pr" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/llm-d/llm-d-router.git
+          git fetch upstream main
+
+          if ! git merge-base --is-ancestor upstream/main HEAD; then
+            if ! git merge --no-commit --no-ff upstream/main && ! git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+              echo "::error::git merge failed without leaving a merge in progress"
+              exit 1
+            fi
+          fi
+
+          # Only fork-*.yaml workflows exist in the fork, so upstream workflows never
+          # run on its pushes, PRs, issues or comments. Deleting them also settles
+          # conflicts between an upstream edit and the fork's deletion.
+          { git ls-files .github/workflows | grep -v '^\.github/workflows/fork-' || true; } \
+            | sort -u | xargs -r git rm -q -f --
+
+          if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+            echo "::warning::Merge conflict with upstream/main, asking Claude to resolve it"
+            git diff --name-only --diff-filter=U | tee "$RUNNER_TEMP/conflicts.txt"
+            echo "result=conflict" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+            git commit --no-edit
+          elif ! git diff --cached --quiet; then
+            git commit -m "Remove upstream workflows from the fork"
+          else
+            echo "::notice::Already up to date with upstream"
+            echo "result=up-to-date" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git diff --quiet origin/main HEAD -- .github; then
+            echo "result=clean" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::The sync changes .github/, opening a PR for review"
+            echo "result=review" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push merge to main
+        if: steps.merge.outputs.result == 'clean'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
+
+      - name: Set up Go
+        if: steps.merge.outputs.result == 'conflict'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Resolve conflicts with Claude
+        if: steps.merge.outputs.result == 'conflict'
+        uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ github.token }}
+          anthropic_federation_rule_id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+          anthropic_organization_id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+          anthropic_service_account_id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+          anthropic_workspace_id: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
+          prompt: |
+            This repository is a fork of llm-d/llm-d-router. A merge of upstream/main
+            into main is in progress and stopped on conflicts. The conflicted files are
+            listed in ${{ runner.temp }}/conflicts.txt.
+
+            Resolve every conflict so that both upstream's changes and the fork's changes
+            are kept. Use `git log --oneline main..upstream/main -- <file>` and
+            `git log --oneline upstream/main..main -- <file>` to see what each side
+            changed. Follow CLAUDE.md. Do not change anything beyond what the
+            resolution needs. Remove all conflict markers and `git add` each resolved file.
+            Do not commit. The fork deletes every workflow under .github/workflows
+            except fork-*.yaml on purpose: do not restore any of them.
+
+            Then run `go build ./...` and `go vet ./...` and fix any errors the
+            resolution caused.
+
+            Finally write a short Markdown summary to ${{ runner.temp }}/resolution.md:
+            one bullet per conflicted file saying what each side changed and how you
+            combined them, and a list of anything you were unsure about.
+          claude_args: |
+            --model claude-opus-5-5
+            --max-turns 80
+            --allowedTools "Read" "Edit" "Write" "Glob" "Grep" "Bash(git status*)" "Bash(git diff*)" "Bash(git log*)" "Bash(git show*)" "Bash(git add *)" "Bash(go build *)" "Bash(go vet *)"
+
+      - name: Open pull request
+        if: steps.merge.outputs.result == 'conflict' || steps.merge.outputs.result == 'review'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RESULT: ${{ steps.merge.outputs.result }}
+        run: |
+          if [ "$RESULT" = conflict ]; then
+            if [ -n "$(git diff --name-only --diff-filter=U)" ] || git grep -nE '^(<<<<<<<|>>>>>>>)( |$)' -- .; then
+              echo "::error::Conflicts remain after the Claude step, resolve the merge manually"
+              exit 1
+            fi
+            if git ls-files .github/workflows | grep -v '^\.github/workflows/fork-'; then
+              echo "::error::Upstream workflows were restored during the conflict resolution"
+              exit 1
+            fi
+            git commit --no-edit
+            title="Sync with upstream (conflicts resolved by Claude)"
+          else
+            title="Sync with upstream (.github/ changes to review)"
+          fi
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/${SYNC_BRANCH}"
+          {
+            echo "Merge of upstream llm-d/llm-d-router main."
+            echo
+            echo "Changes under \`.github/\`:"
+            echo
+            echo '```'
+            git diff --name-status origin/main HEAD -- .github
+            echo '```'
+            if [ "$RESULT" = conflict ]; then
+              echo
+              echo "Conflicted files, resolved by Claude:"
+              sed 's/^/- `/; s/$/`/' "$RUNNER_TEMP/conflicts.txt"
+              echo
+              cat "$RUNNER_TEMP/resolution.md" 2>/dev/null || echo "Claude wrote no summary."
+            fi
+          } > "$RUNNER_TEMP/body.md"
+          gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$SYNC_BRANCH" \
+            --title "$title" --body-file "$RUNNER_TEMP/body.md"
