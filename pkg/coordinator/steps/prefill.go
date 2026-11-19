@@ -22,7 +22,9 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/http"
 
+	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
@@ -46,6 +48,7 @@ type PrefillStep struct {
 	gwClient        *gateway.Client
 	kv              kv.Connector
 	ec              ec.Connector
+	notifier        *storedNotifier
 }
 
 func NewPrefillStep(gwClient *gateway.Client, params map[string]any) (pipeline.Step, error) {
@@ -64,11 +67,16 @@ func NewPrefillStep(gwClient *gateway.Client, params map[string]any) (pipeline.S
 	if err != nil {
 		return nil, fmt.Errorf("prefill: %w", err)
 	}
+	notifier, _, err := parseStoredNotifier(params, kvConn)
+	if err != nil {
+		return nil, fmt.Errorf("prefill: %w", err)
+	}
 	return &PrefillStep{
 		useOpenAIFormat: useOpenAI,
 		gwClient:        gwClient,
 		kv:              kvConn,
 		ec:              ecConn,
+		notifier:        notifier,
 	}, nil
 }
 
@@ -83,35 +91,60 @@ func (s *PrefillStep) Execute(ctx context.Context, reqCtx *pipeline.RequestConte
 		return fmt.Errorf("prefill: %w", err)
 	}
 
+	path := format.Path()
+	if s.notifier != nil {
+		return s.executeNotified(ctx, logger, reqCtx, body, path)
+	}
+
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("prefill: marshal: %w", err)
 	}
 
-	path := format.Path()
 	logger.V(logutil.DEFAULT).Info("sending request", "path", path)
+	res := s.post(ctx, logger, path, bodyBytes, gatewayHeaders(reqCtx, gateway.PhasePrefill))
+	return s.apply(logger, reqCtx, path, res)
+}
 
+// prefillResult is the outcome of the prefill call, kept apart from the
+// request context until apply, so that the call can run concurrently with
+// the decode step.
+type prefillResult struct {
+	err       error
+	header    http.Header
+	resp      prefillResponse
+	decodeErr error
+}
+
+func (s *PrefillStep) post(ctx context.Context, logger logr.Logger, path string, body []byte, headers map[string]string) prefillResult {
 	resp, err := postToGateway(ctx, logger, s.gwClient, gatewayRequest{
 		logMsg:   "request body",
 		step:     PrefillStepName,
 		upstream: coordmetrics.UpstreamPrefill,
 		path:     path,
-		body:     bodyBytes,
-		headers:  gatewayHeaders(reqCtx, gateway.PhasePrefill),
+		body:     body,
+		headers:  headers,
 	})
 	if err != nil {
-		return err
+		return prefillResult{err: err}
 	}
 	defer resp.Body.Close()
+	res := prefillResult{header: resp.Header}
+	res.decodeErr = json.NewDecoder(resp.Body).Decode(&res.resp)
+	return res
+}
 
-	reqCtx.PeerTopology = resp.Header.Get(reqcommon.PeerTopologyHeaderKey)
-
-	var prefillResp prefillResponse
-	if err := json.NewDecoder(resp.Body).Decode(&prefillResp); err != nil {
-		return fmt.Errorf("prefill: decode response: %w", err)
+// apply records a prefill result on the request context.
+func (s *PrefillStep) apply(logger logr.Logger, reqCtx *pipeline.RequestContext, path string, res prefillResult) error {
+	if res.err != nil {
+		return res.err
+	}
+	reqCtx.PeerTopology = res.header.Get(reqcommon.PeerTopologyHeaderKey)
+	if res.decodeErr != nil {
+		return fmt.Errorf("prefill: decode response: %w", res.decodeErr)
 	}
 
-	reqCtx.KVTransferParams = coerceParamsMap(logger, prefillResp.KVTransferParams, "kv_transfer_params")
+	reqCtx.KVTransferParams = coerceParamsMap(logger, res.resp.KVTransferParams, "kv_transfer_params")
 	reqCtx.PrefillDone = true
 	if len(reqCtx.KVTransferParams) == 0 && s.kv.Name() == kv.NIXL {
 		// kv-nixl always requests a remote-decode handoff, so missing
@@ -121,7 +154,7 @@ func (s *PrefillStep) Execute(ctx context.Context, reqCtx *pipeline.RequestConte
 		logger.Info("prefill returned no kv_transfer_params; decode will recompute the prompt",
 			"kvConnector", s.kv.Name(), "path", path)
 	}
-	reqCtx.CaptureResponseHeaders(resp.Header)
+	reqCtx.CaptureResponseHeaders(res.header)
 
 	logger.V(logutil.DEFAULT).Info("complete")
 	return nil

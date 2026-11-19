@@ -799,7 +799,7 @@ only the request carrier differs.
 | `render` | Tokenize via the render service; populate `TokenIDs` and each entry's hash/placeholder/kwargs from the per-modality `mm_hashes` / `mm_placeholders` / `kwargs_data` maps. | `address` (required), `timeout`, `max_total_tokens`, `max_total_placeholder_tokens` |
 | `conditional-decode` | Optional fast path: attempt decode with `Prefer: if-available`; on 412 continue, otherwise stream the response and stop. | (none) |
 | `encode` | Parallel fan-out, one request per multimodal entry; merge EC descriptors. | `max_parallel`, `use_openai_format`, `ec_connector` |
-| `prefill` | Single prefill call with tokens + EC/KV hints; capture `kv_transfer_params`. | `use_openai_format`, `kv_connector`, `ec_connector` |
+| `prefill` | Single prefill call with tokens + EC/KV hints; capture `kv_transfer_params`. Optionally returns before the prefill response, once the prefill worker reports the prompt KV stored but a tail, so decode overlaps the end of prefill (`notify_stored_url`, `kv-shared-storage` only). | `use_openai_format`, `kv_connector`, `ec_connector`, `notify_stored_url`, `notify_stored_tokens_left`, `notify_stored_tokens_left_ratio` |
 | `decode` | Stream the final completion to the client. After a prefill, optionally has the worker wait for the KV the prefill worker stores (`wait_for_stored_timeout`, `kv-shared-storage` only). | `kv_connector`, `wait_for_stored_timeout` |
 
 Parameter semantics and defaults are documented inline in

@@ -443,6 +443,25 @@ pipeline:
       #   use_openai_format: true
       #   ec_connector: ec-nixl     # overrides pipeline.ec_connector
       #   kv_connector: kv-nixl     # overrides pipeline.kv_connector
+      #
+      #   notify_stored_url, with kv_connector kv-shared-storage, starts the
+      #   decode step before the prefill response. The
+      #   prefill request carries kv_transfer_params.notify_stored with a
+      #   per-request URL under this base URL, served by this coordinator at
+      #   /llm-d/kv-stored/{id}. The prefill worker POSTs to it once the tier
+      #   it shares with the decode workers holds the prompt KV but a tail,
+      #   the larger of notify_stored_tokens_left tokens and
+      #   notify_stored_tokens_left_ratio of the prompt (both default to 0).
+      #   The step returns on the notify or on the prefill response,
+      #   whichever comes first. On the notify, the prefill response headers
+      #   are not forwarded. The base URL must reach this
+      #   replica, not a load-balanced Service; ${VAR} references are
+      #   expanded from the environment. The prefill workers must allow its
+      #   host (vLLM OffloadingConnector notify_stored_hosts), and the decode
+      #   step needs wait_for_stored_timeout.
+      #   notify_stored_url: "http://${POD_IP}:8080"
+      #   notify_stored_tokens_left: 0
+      #   notify_stored_tokens_left_ratio: 0.25
 
     # -------------------------------------------------------------------
     # decode: streams the completion back to the client. Last step.

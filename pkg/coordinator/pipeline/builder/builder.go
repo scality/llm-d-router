@@ -21,6 +21,7 @@ package builder
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/llm-d/llm-d-router/pkg/coordinator/config"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/gateway"
@@ -36,6 +37,9 @@ import (
 // format (use_openai_format=false) sends token IDs that only the render step
 // produces, so it requires a render step in the pipeline.
 func validatePipeline(p config.PipelineConfig) error {
+	if err := validateNotifyStored(p); err != nil {
+		return err
+	}
 	for i, s := range p.Steps {
 		if s.Type == asyncbroker.StepName && i > 0 {
 			return fmt.Errorf("the %q step must be the first pipeline step, found it at position %d", asyncbroker.StepName, i+1)
@@ -50,6 +54,31 @@ func validatePipeline(p config.PipelineConfig) error {
 		}
 	}
 	return fmt.Errorf("pipeline.use_openai_format=false requires a %q step (the tokens-in format sends token IDs that render produces)", steps.RenderStepName)
+}
+
+// validateNotifyStored rejects a prefill step's notify_stored_url that cannot
+// work: the decode step it starts early must wait for the KV still being
+// stored, else the decode worker recomputes it.
+func validateNotifyStored(p config.PipelineConfig) error {
+	notify, wait := false, false
+	for _, s := range p.Steps {
+		switch s.Type {
+		case steps.PrefillStepName:
+			_, notify = s.Params[steps.ParamNotifyStoredURL]
+		case steps.DecodeStepName:
+			if v, ok := s.Params[steps.ParamWaitForStoredTimeout].(string); ok {
+				d, err := time.ParseDuration(v)
+				wait = err == nil && d > 0
+			}
+		}
+	}
+	if !notify {
+		return nil
+	}
+	if !wait {
+		return fmt.Errorf("%s on the %q step requires %s on the %q step", steps.ParamNotifyStoredURL, steps.PrefillStepName, steps.ParamWaitForStoredTimeout, steps.DecodeStepName)
+	}
+	return nil
 }
 
 // usesOpenAIFormatParam reports whether stepType reads the use_openai_format
