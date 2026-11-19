@@ -180,6 +180,9 @@ func TestPrefillStep_SendsCorrectGenerateRequest(t *testing.T) {
 	if reqCtx.KVTransferParams["block_id"] != "block-xyz" {
 		t.Fatalf("expected block_id=block-xyz, got %v", reqCtx.KVTransferParams["block_id"])
 	}
+	if !reqCtx.PrefillDone {
+		t.Fatal("expected PrefillDone after the prefill response")
+	}
 }
 
 func TestPrefillStep_GenerateUsesMMMetadataWhenECPresent(t *testing.T) {

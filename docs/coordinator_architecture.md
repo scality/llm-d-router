@@ -923,7 +923,7 @@ upstream gRPC methods regardless of `worker_protocol`.
 | `conditional-decode` | Optional fast path: attempt decode with `Prefer: if-available`; on 412 continue, otherwise stream the response and stop. A served hit runs the same prompt-token parity check as `decode`. Optionally sends the rendered token IDs, as on `decode` (`forward_prompt_token_ids`). | `prompt_token_parity`, `forward_prompt_token_ids` |
 | `encode` | Parallel fan-out, one request per multimodal entry; merge EC descriptors. | `max_parallel`, `use_openai_format`, `ec_connector` |
 | `prefill` | Single prefill call with tokens + EC/KV hints; capture `kv_transfer_params`. | `use_openai_format`, `kv_connector`, `ec_connector` |
-| `decode` | Stream the final completion to the client. Checks that the worker's prompt token count matches the rendered one (`prompt_token_parity`). Optionally sends the rendered token IDs in `kv_transfer_params.prompt_token_ids` so the worker skips tokenization (`forward_prompt_token_ids`). | `kv_connector`, `prompt_token_parity`, `forward_prompt_token_ids` |
+| `decode` | Stream the final completion to the client. Checks that the worker's prompt token count matches the rendered one (`prompt_token_parity`). Optionally sends the rendered token IDs in `kv_transfer_params.prompt_token_ids` so the worker skips tokenization (`forward_prompt_token_ids`). After a prefill, optionally has the worker wait for the KV the prefill worker stores (`wait_for_stored_timeout`, `kv-shared-storage` only). | `kv_connector`, `prompt_token_parity`, `forward_prompt_token_ids`, `wait_for_stored_timeout` |
 
 Parameter semantics and defaults are documented inline in
 [config/coordinator/coordinator.yaml](../config/coordinator/coordinator.yaml). The wire formats each step

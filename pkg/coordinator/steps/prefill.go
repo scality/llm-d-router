@@ -125,6 +125,7 @@ func (s *PrefillStep) Execute(ctx context.Context, reqCtx *pipeline.RequestConte
 	}
 
 	reqCtx.KVTransferParams = coerceParamsMap(logger, prefillResp.KVTransferParams, "kv_transfer_params")
+	reqCtx.PrefillDone = true
 	var cachedTokens *int
 	if prefillResp.Usage != nil {
 		n, _ := usage.CachedTokens(prefillResp.Usage)

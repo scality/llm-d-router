@@ -240,6 +240,9 @@ type RequestContext struct {
 	// kv-offloading connector's ReadPrefillResponse; nil before the prefill
 	// response and with any other connector.
 	PrefillPeer *P2PPeer
+	// PrefillDone reports whether the HTTP PrefillStep got the prefill
+	// response, so the decode step knows a prefill worker is storing the KV.
+	PrefillDone bool
 
 	forwardResponseHeaders map[string]struct{}
 	downstreamHeaders      map[string]string

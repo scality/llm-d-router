@@ -60,6 +60,12 @@ const (
 	// ignore the field, and a render step, which the pipeline builder checks.
 	// Defaults to false.
 	ParamForwardPromptTokenIDs = "forward_prompt_token_ids"
+	// ParamWaitForStoredTimeout, a Go duration string ("5s"), makes the decode
+	// step's HTTP request after a prefill carry kv_transfer_params.wait_for_stored
+	// with this timeout: the decode worker waits up to that long for the KV the
+	// prefill worker is storing, for workers that store the KV after answering
+	// the prefill. Requires kv-shared-storage. Unset or 0 disables it.
+	ParamWaitForStoredTimeout = "wait_for_stored_timeout"
 )
 
 func buildKVConnector(params map[string]any) (kv.Connector, error) {

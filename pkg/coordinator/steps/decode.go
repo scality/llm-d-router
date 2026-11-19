@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -49,6 +50,7 @@ type DecodeStep struct {
 	forceStream       bool
 	budget            *forceStreamBudget
 	forwardTokenIDs   bool
+	waitForStored     time.Duration
 }
 
 func NewDecodeStep(gwClient *gateway.Client, params map[string]any) (pipeline.Step, error) {
@@ -78,7 +80,17 @@ func NewDecodeStep(gwClient *gateway.Client, params map[string]any) (pipeline.St
 	if err != nil {
 		return nil, fmt.Errorf("decode: %w", err)
 	}
-	step := &DecodeStep{gwClient: gwClient, kv: kvConn, ec: ecConn, promptTokenParity: parity, forceStream: forceStream, forwardTokenIDs: forwardTokenIDs}
+	waitForStored, _, err := paramDuration(params, ParamWaitForStoredTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("decode: %w", err)
+	}
+	if waitForStored < 0 {
+		return nil, fmt.Errorf("decode: %s must not be negative, got %v", ParamWaitForStoredTimeout, waitForStored)
+	}
+	if waitForStored > 0 && kvConn.Name() != kv.SharedStorage {
+		return nil, fmt.Errorf("decode: %s requires kv_connector %s, got %s", ParamWaitForStoredTimeout, kv.SharedStorage, kvConn.Name())
+	}
+	step := &DecodeStep{gwClient: gwClient, kv: kvConn, ec: ecConn, promptTokenParity: parity, forceStream: forceStream, forwardTokenIDs: forwardTokenIDs, waitForStored: waitForStored}
 	if forceStream {
 		budget, err := parseForceStreamBudget(params)
 		if err != nil {
@@ -233,6 +245,9 @@ func (s *DecodeStep) prepareDecodeBody(ctx context.Context, reqCtx *pipeline.Req
 	format := reqcommon.DetectAPIType(reqCtx.OriginalPath)
 
 	kvParams := s.kv.PrepareDecodeKVParams(ctx, reqCtx)
+	if s.waitForStored > 0 && reqCtx.PrefillDone {
+		kvParams[reqcommon.FieldWaitForStored] = reqcommon.WaitForStoredParams(s.waitForStored)
+	}
 	s.injectUUIDs(reqCtx, logger)
 
 	switch format {

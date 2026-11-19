@@ -16,6 +16,16 @@ limitations under the License.
 
 package request
 
+import "time"
+
+// WaitForStoredParams returns the kv_transfer_params.wait_for_stored value of
+// a decode request whose prompt KV a prefill pod is storing in a tier both
+// pods share: the decode pod waits up to timeout for its whole prompt to be
+// stored, then computes what is still missing.
+func WaitForStoredParams(timeout time.Duration) map[string]any {
+	return map[string]any{FieldTimeoutMS: timeout.Milliseconds()}
+}
+
 // RemoteDecoderParams returns the kv_transfer_params of an OffloadingConnector
 // P2P tier prefill request: the prefill pod stores the KV under kvRequestID
 // for a decode pod to pull.
