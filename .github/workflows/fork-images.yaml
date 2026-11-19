@@ -1,0 +1,43 @@
+name: Fork - Build and Push Images
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    # Upstream already publishes these images through ci-dev.yaml and ci-release.yaml.
+    if: github.repository_owner != 'llm-d'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - { docker-file: Dockerfile.epp, name: llm-d-router-endpoint-picker }
+          - { docker-file: Dockerfile.sidecar, name: llm-d-router-disagg-sidecar }
+          - { docker-file: Dockerfile.coordinator, name: llm-d-router-coordinator }
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compute registry and tag
+        id: params
+        run: |
+          echo "registry=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push ${{ matrix.image.name }}
+        uses: ./.github/actions/docker-build-and-push
+        with:
+          docker-file: ${{ matrix.image.docker-file }}
+          image-name: ${{ matrix.image.name }}
+          tag: ${{ steps.params.outputs.tag }}
+          registry: ${{ steps.params.outputs.registry }}
+          github-token: ${{ github.token }}
+          commit-sha: ${{ github.sha }}
+          prerelease: 'true'
+          push: 'true'
