@@ -921,6 +921,11 @@ only when that plugin is configured and records the related prediction, observat
 | `llm_d_epp_request_slo_violation_total` | Counter | `plugin_name`, `plugin_type`, `model_name`, `target_model_name`, `type` | SLO violations. |
 | `llm_d_epp_request_prediction_failures_total` | Counter | `plugin_name`, `plugin_type`, `reason` | Failed latency prediction attempts (`request_error`, `nil_response`, `length_mismatch`, `predictor_unavailable`). |
 
+`model_name` is the model in the request body and `target_model_name` is the model after any
+InferenceModelRewrite. Both share the model label cap described in [Metrics catalog](#metrics-catalog):
+the histograms and the violation counter fold names past the cap into `other`, and the
+`inference_request_metric` gauges skip them.
+
 ### Disaggregation
 
 The EPP disaggregation metrics come from two different plugins.
@@ -1250,6 +1255,7 @@ use the labels shown below.
 | `llm_d_epp_kv_cache_events_dedup_removed_hashes_forwarded_total` | Counter | - | Deduplicated removal hashes forwarded. |
 | `llm_d_epp_kv_cache_events_stores_skipped_total` | Counter | `cache_kind`, `reason` | KV store events skipped before prefix indexing. |
 | `llm_d_epp_kv_cache_events_removals_skipped_total` | Counter | `cache_kind`, `reason` | KV removal events skipped before prefix indexing. |
+| `llm_d_epp_kv_cache_events_unknown_tags_skipped_total` | Counter | `tag` | KV events skipped because the engine adapter does not know their tag. |
 | `llm_d_epp_kv_cache_events_active_subscribers` | Gauge | - | ZMQ subscribers currently managed. |
 | `llm_d_epp_kv_cache_events_subscriber_reconnections_total` | Counter | `pod_identifier` | ZMQ subscriber reconnection attempts. |
 | `llm_d_epp_kv_cache_events_messages_received_total` | Counter | `pod_identifier` | Messages received from ZMQ subscribers. |
@@ -1258,6 +1264,17 @@ use the labels shown below.
 | `llm_d_epp_kv_cache_events_snapshot_load_duration_seconds` | Histogram | - | Successful snapshot loads, from the request until the batches are queued for indexing. Failed and unavailable snapshots are counted in `llm_d_epp_kv_cache_events_zmq_errors_total` with `operation="snapshot"`. |
 | `llm_d_epp_kv_cache_events_pool_queue_depth` | Gauge | - | Messages queued across event-pool workers. |
 | `llm_d_epp_kv_cache_events_pool_capacity` | Gauge | - | Event-pool worker capacity. |
+
+A vLLM release can publish an event type that the router's vLLM adapter does not know. The adapter
+skips such an event and applies the other events in the same message to the index.
+`llm_d_epp_kv_cache_events_unknown_tags_skipped_total` counts each skipped event, whether or not
+`enableMetrics` is set. The `tag` label is the event tag as the engine sent it. The label takes at
+most 32 distinct tags plus `other`, and the cap rules in [Metrics catalog](#metrics-catalog) apply.
+An empty tag is reported as `empty` and does not count toward the 32. A series appears when the
+first event with that tag is skipped. The EPP also logs
+`Skipping KV events with an unknown tag` at INFO level the first time it skips each `tag` value,
+with the pod and model of that event. A rising count for a tag means the engine sends an event type
+that this router version ignores.
 
 ### P/D sidecar request and stage metrics
 
